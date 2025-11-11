@@ -36,13 +36,13 @@ export const useSocket = () => {
   };
 
   // Send a message
-  const sendMessage = (message) => {
-    socket.emit('send_message', { message });
+  const sendMessage = (data, ack) => {
+    socket.emit('send_message', data, ack);
   };
 
   // Send a private message
-  const sendPrivateMessage = (to, message) => {
-    socket.emit('private_message', { to, message });
+  const sendPrivateMessage = (to, message, ack) => {
+    socket.emit('private_message', { to, message }, ack);
   };
 
   // Set typing status

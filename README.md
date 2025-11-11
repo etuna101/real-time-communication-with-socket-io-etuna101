@@ -38,10 +38,23 @@ socketio-chat/
 
 ## Getting Started
 
-1. Accept the GitHub Classroom assignment invitation
-2. Clone your personal repository that was created by GitHub Classroom
-3. Follow the setup instructions in the `Week5-Assignment.md` file
-4. Complete the tasks outlined in the assignment
+Server setup:
+
+```bash
+cd server
+npm install
+npm run dev
+```
+
+Client setup:
+
+```bash
+cd client
+npm install
+npm run dev
+```
+
+By default the server runs on `http://localhost:5000` and the client on `http://localhost:5173`. You can set `VITE_SOCKET_URL` in the client to point to a different server.
 
 ## Files Included
 
@@ -50,6 +63,7 @@ socketio-chat/
   - Basic project structure
   - Socket.io configuration templates
   - Sample components for the chat interface
+  - Global chat, private messages, rooms, typing indicators, read receipts, notifications
 
 ## Requirements
 

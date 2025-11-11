@@ -30,6 +30,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 const users = {};
 const messages = [];
 const typingUsers = {};
+const rooms = { global: { name: 'global', members: new Set() } };
 
 // Socket.io connection handler
 io.on('connection', (socket) => {
@@ -37,20 +38,25 @@ io.on('connection', (socket) => {
 
   // Handle user joining
   socket.on('user_join', (username) => {
-    users[socket.id] = { username, id: socket.id };
+    users[socket.id] = { username, id: socket.id, rooms: new Set(['global']) };
+    socket.join('global');
+    rooms.global.members.add(socket.id);
     io.emit('user_list', Object.values(users));
     io.emit('user_joined', { username, id: socket.id });
     console.log(`${username} joined the chat`);
   });
 
   // Handle chat messages
-  socket.on('send_message', (messageData) => {
+  socket.on('send_message', (messageData, ack) => {
     const message = {
       ...messageData,
       id: Date.now(),
       sender: users[socket.id]?.username || 'Anonymous',
       senderId: socket.id,
       timestamp: new Date().toISOString(),
+      room: messageData?.room || 'global',
+      deliveredTo: new Set(), // socket ids
+      readBy: new Set(), // socket ids
     };
     
     messages.push(message);
@@ -60,7 +66,22 @@ io.on('connection', (socket) => {
       messages.shift();
     }
     
-    io.emit('receive_message', message);
+    // delivery ack to sender
+    if (typeof ack === 'function') {
+      ack({ ok: true, messageId: message.id });
+    }
+
+    const payload = {
+      ...message,
+      deliveredTo: undefined,
+      readBy: undefined,
+    };
+
+    if (message.room && rooms[message.room]) {
+      io.to(message.room).emit('receive_message', payload);
+    } else {
+      io.emit('receive_message', payload);
+    }
   });
 
   // Handle typing indicator
@@ -78,8 +99,37 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Join a room
+  socket.on('join_room', (roomName) => {
+    if (!roomName) return;
+    if (!rooms[roomName]) {
+      rooms[roomName] = { name: roomName, members: new Set() };
+    }
+    socket.join(roomName);
+    rooms[roomName].members.add(socket.id);
+    users[socket.id]?.rooms?.add(roomName);
+    io.to(roomName).emit('room_notification', {
+      room: roomName,
+      message: `${users[socket.id]?.username || 'User'} joined ${roomName}`,
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  // Leave a room
+  socket.on('leave_room', (roomName) => {
+    if (!roomName || !rooms[roomName]) return;
+    socket.leave(roomName);
+    rooms[roomName].members.delete(socket.id);
+    users[socket.id]?.rooms?.delete(roomName);
+    io.to(roomName).emit('room_notification', {
+      room: roomName,
+      message: `${users[socket.id]?.username || 'User'} left ${roomName}`,
+      timestamp: new Date().toISOString(),
+    });
+  });
+
   // Handle private messages
-  socket.on('private_message', ({ to, message }) => {
+  socket.on('private_message', ({ to, message }, ack) => {
     const messageData = {
       id: Date.now(),
       sender: users[socket.id]?.username || 'Anonymous',
@@ -91,6 +141,21 @@ io.on('connection', (socket) => {
     
     socket.to(to).emit('private_message', messageData);
     socket.emit('private_message', messageData);
+    if (typeof ack === 'function') {
+      ack({ ok: true, messageId: messageData.id });
+    }
+  });
+
+  // Read receipts
+  socket.on('message_read', ({ messageId }) => {
+    const msg = messages.find((m) => m.id === messageId);
+    if (!msg) return;
+    msg.readBy?.add?.(socket.id);
+    io.to(msg.senderId).emit('message_read', {
+      messageId,
+      readerId: socket.id,
+      reader: users[socket.id]?.username,
+    });
   });
 
   // Handle disconnection
@@ -101,6 +166,9 @@ io.on('connection', (socket) => {
       console.log(`${username} left the chat`);
     }
     
+    // cleanup rooms
+    Object.values(rooms).forEach((room) => room.members.delete(socket.id));
+    users[socket.id]?.rooms?.clear?.();
     delete users[socket.id];
     delete typingUsers[socket.id];
     
@@ -111,7 +179,13 @@ io.on('connection', (socket) => {
 
 // API routes
 app.get('/api/messages', (req, res) => {
-  res.json(messages);
+  res.json(
+    messages.map((m) => ({
+      ...m,
+      deliveredTo: undefined,
+      readBy: undefined,
+    }))
+  );
 });
 
 app.get('/api/users', (req, res) => {
